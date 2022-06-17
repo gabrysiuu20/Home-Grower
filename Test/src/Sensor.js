@@ -1,9 +1,8 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import {View, Text, StyleSheet, Button, FlatList,TouchableHighlight, TouchableOpacity, Platform, NativeModules, NativeEventEmitter, ToastAndroid, StatusBar } from 'react-native';
 import BleManager from "react-native-ble-manager";
 import {Buffer} from 'buffer';
 import getBluetoothScanPermission from './Permissions';
-import RNFS from 'react-native-fs';
 
 const BleManagerModule = NativeModules.BleManager;
 const bleManagerEmitter = new NativeEventEmitter(BleManagerModule);
@@ -18,6 +17,13 @@ const Sensor = () => {
   const [datas, setDatas] = useState();
   const peripherals = new Map();
 
+  const createConnection = async () => {
+    await scan();
+    setTimeout(
+      connect,
+      5000
+    );
+  }
   
 
 
@@ -28,15 +34,18 @@ const Sensor = () => {
     if(peripheral.name == "Flower care"){
       console.log(peripheral)
 
-      // powiadomienie wskazujące na połączenie się z czujnikiem
-      ToastAndroid.showWithGravity("Połączono z urządzeniem o adresie MAC: " + peripheral.id, ToastAndroid.SHORT, ToastAndroid.BOTTOM);
       
       if (flower_care.length == 0){
+        // powiadomienie wskazujące na połączenie się z czujnikiem
+      ToastAndroid.showWithGravity("Połączono z urządzeniem o adresie MAC: " + peripheral.id, ToastAndroid.SHORT, ToastAndroid.BOTTOM);
+      console.log("si")
+      
+
         peripherals.set(peripheral.id, peripheral);
         setFlowerCare(peripheral);
-        BleManager.stopScan().then(() => {
-            console.log("Scan stopped");
-          });
+        //BleManager.stopScan().then(() => {
+        //   console.log("Scan stopped");
+        //  });
       }
     }
   }
@@ -73,30 +82,21 @@ const Sensor = () => {
 
 
   //bleManagerEmmiter obsługuje eventy
-  bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral)
-
-  bleManagerEmitter.addListener( 'BleManagerStopScan',handleStopScan)
-
-  bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', handleUpdateValueForCharacteristic );
-
-  //bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', handleDisconnectedPeripheral );
-
-
-
-  /*
+  //bleManagerEmitter.addListener('BleManagerDisconnectPeripheral', handleDisconnectedPeripheral ); 
   useEffect(()=> {
-    bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral)
-    bleManagerEmitter.addListener( 'BleManagerStopScan',handleStopScan)
-    bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', handleUpdateValueForCharacteristic );
+    const subs_discover = bleManagerEmitter.addListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral)
+    const subs_stopScan = bleManagerEmitter.addListener( 'BleManagerStopScan',handleStopScan)
+    const subs_updateVal = bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', handleUpdateValueForCharacteristic );
   return () => {
     //eventy do usunięcia
 
-    bleManagerEmitter.removeListener('BleManagerDiscoverPeripheral', handleDiscoverPeripheral)
-    bleManagerEmitter.addListener( 'BleManagerStopScan',handleStopScan)
-    bleManagerEmitter.addListener('BleManagerDidUpdateValueForCharacteristic', handleUpdateValueForCharacteristic );
-    bleManagerEmitter.r
+    subs_discover.remove()
+    subs_stopScan.remove()
+    subs_updateVal.remove()
+    //bleManagerEmitter.remove('BleManagerStopScan',handleStopScan)
+    //bleManagerEmitter.remove('BleManagerDidUpdateValueForCharacteristic', handleUpdateValueForCharacteristic );
   }
-  }, []) */
+  }, []) 
 
 
   //funkcja skanująca urządzenia
@@ -112,7 +112,7 @@ const Sensor = () => {
         await getBluetoothScanPermission()
       }
 
-    await BleManager.scan([], 2).then(() => {
+    await BleManager.scan([], 5).then(() => {
       console.log('Scanning...');
     })
     .catch((e) => {
@@ -157,6 +157,7 @@ const Sensor = () => {
           console.log(error);
       });
 
+      
 
       //Start the notification on the specified characteristic, you need to call retrieveServices method before. 
       //The buffer will collect a number or messages from the server and then emit once the buffer count it reached. 
@@ -168,19 +169,80 @@ const Sensor = () => {
       .catch((error) => {
           console.log(error);
       });
+
+
+
+}
+
+const getHistory = async (peripheral, service ="00001206-0000-1000-8000-00805f9b34fb", characteristic = "00001a11-0000-1000-8000-00805f9b34fb") => { 
+
+  const charwrite = "00001a10-0000-1000-8000-00805f9b34fb"
+
+  console.log("trying to connect:")
+  console.log(peripheral.id)
+  console.log(datas)
+
+  await BleManager.connect(peripheral.id).then(() => {
+    console.log('Connected to ' + peripheral.id);
+  })
+  .catch((error) => {
+    console.log(error);
+  });
+
+  await BleManager.retrieveServices(peripheral.id).then((peripheralData) => {
+    console.log('Retrieved peripheral services'); 
+  })
+  .catch((error) => {
+    console.log(error);
+  });
+
+
+  await BleManager.write(peripheral.id, "00001206-0000-1000-8000-00805f9b34fb", "00001a10-0000-1000-8000-00805f9b34fb", [0xa0, 0x00, 0x00])
+      .then(() => {
+          console.log("Enabled real-time history!");
+      })
+      .catch((error) => {
+        console.log("nah")
+          console.log(error);
+      });
+
+      await BleManager.read(peripheral.id, "00001206-0000-1000-8000-00805f9b34fb", "00001a11-0000-1000-8000-00805f9b34fb")
+      .then((readData) => {
+          console.log("read history!");
+  
+          const buffer = Buffer.from(readData);
+          const number_of_records = buffer.readUint16LE(0)
+
+          console.log(buffer)
+          console.log(number_of_records)
+
+          let val = 431
+          val &= 0xFFFF;
+          console.log(val)
+          
+          const hex = val.toString(16).toUpperCase();
+          console.log(typeof(val))
+          console.log(hex)
+          //console.log(("0000" + hex).slice(-3))
+
+          //const n = Buffer.from("1a");
+          const n = Buffer([parseInt(hex.toString(16),16)])
+          console.log(n)
+      })
+      .catch((error) => {
+          console.log(error);
+      });
+
+
 }
 
 
-const renderItem = (item) => {
-    //const color = item.connected ? 'green' : '#fff';
 
-    console.log("render")
-    return (
-      <TouchableHighlight>
-          <Text style={{fontSize: 24, textAlign: 'center', color: '#333333', padding: 10}}>{item.title}</Text>
-      </TouchableHighlight>
-    );
-  }
+
+
+
+
+
 
 // GENEROWANIE PRZYCISKÓW
   return (
@@ -198,6 +260,15 @@ const renderItem = (item) => {
               onPress={() => connect(flower_care)}
               //onPress={connectAndPrepare}
               title="Połącz"
+              color="#841584"
+              accessibilityLabel="Połącz"
+        />
+      
+      <Text></Text>
+
+      <Button
+              onPress={() => getHistory(flower_care)}
+              title="Historia"
               color="#841584"
               accessibilityLabel="Połącz"
         />
